@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=5">
 </head>
 <body>
 <div class="wrap">
@@ -31,6 +31,11 @@
     <button role="tab" aria-selected="true" data-tab="write">기록하기</button>
     <button role="tab" aria-selected="false" data-tab="list">모아보기</button>
   </nav>
+
+  <div class="banner hidden" id="loginBanner">
+    <span>먼저 로그인해야 기록할 수 있습니다.</span>
+    <button class="btn primary" type="button" id="btnLoginBanner">로그인</button>
+  </div>
 
   <section id="tab-write">
     <div id="result"></div>
@@ -149,6 +154,7 @@
   </div>
 </dialog>
 
-<script src="app.js"></script>
+<div class="dlg-backdrop hidden" id="dlgBackdrop"></div>
+<script src="app.js?v=5"></script>
 </body>
 </html>

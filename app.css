@@ -146,3 +146,9 @@ dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
 .dev span{display:block;font-size:12px;color:var(--pencil)}
 .dev .btn{padding:7px 12px;font-size:13px;flex:none}
 .secnote{font-size:12px;color:var(--pencil);line-height:1.6;margin:12px 0 0}
+
+.banner{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--cloth);border-radius:8px;padding:12px 14px;margin-bottom:20px;font-size:14px}
+.banner .btn{padding:9px 16px;flex:none}
+dialog:not([open]){display:none}
+dialog.fb{position:fixed;left:50%;top:max(24px,env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:70;box-shadow:0 10px 40px rgba(0,0,0,.35);max-height:calc(100% - 48px);overflow:auto;margin:0}
+.dlg-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:65}
