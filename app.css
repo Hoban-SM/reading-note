@@ -2,8 +2,8 @@
   --cloth:#1F4D3F; --paper:#F6F7F3; --surface:#FFFFFF;
   --ink:#1B2420; --pencil:#6B7470; --rule:#DADFD9; --marker:#F4E46A; --danger:#B3261E; --rec:#C62828;
   --on-cloth:#FFFFFF;
-  --serif:'Gowun Batang','Nanum Myeongjo','AppleMyungjo',serif;
-  --sans:'IBM Plex Sans KR','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
+  --serif:'Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  --sans:'Nanum Gothic','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
   padding-bottom:env(safe-area-inset-bottom,0px);
