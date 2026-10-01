@@ -25,6 +25,14 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   $('#today').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
   /* ── 보안: 로그인 · 요청 서명 (공용 모듈 outbox.js) ── */
+  if(!window.RN){
+    // outbox.js가 GitHub에 없거나 이름이 다를 때: 원인을 바로 알려 줌
+    const st = document.getElementById('status');
+    st.textContent = '필요한 파일 outbox.js를 찾지 못했습니다. GitHub 저장소에 outbox.js와 sw.js가 있는지 확인해 주세요.';
+    st.className = 'status err';
+    document.getElementById('btnSave').disabled = true;
+    return;
+  }
   const RN = window.RN;
   const GAS_URL_RE = RN.GAS_URL_RE;
   const getKey = () => RN.getKey();
