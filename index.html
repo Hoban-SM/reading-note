@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=5">
+<link rel="stylesheet" href="app.css?v=9">
 </head>
 <body>
 <div class="wrap">
@@ -38,6 +38,7 @@
   </div>
 
   <section id="tab-write">
+    <div class="queue hidden" id="queue" aria-live="polite"></div>
     <div id="result"></div>
 
     <div class="field">
@@ -150,11 +151,24 @@
     <div class="hint" id="devInfo"></div>
     <div id="devList"></div>
     <p class="secnote">잃어버린 기기는 여기서 해제하세요. 모든 기기를 한 번에 로그아웃하려면 Apps Script 편집기에서 revokeAllDevices()를 실행합니다.</p>
+    <div class="upd">
+      <h3>서버 업데이트</h3>
+      <p class="secnote">새 Code.gs를 구글 드라이브 <b>독서노트 › 업데이트</b> 폴더에 넣고 아래를 누르세요. 적용 전 현재 코드는 자동으로 백업됩니다.</p>
+      <div id="updInfo" class="hint"></div>
+      <div class="field"><label class="f" for="updPw">비밀번호 확인</label><input type="password" id="updPw" autocomplete="current-password"></div>
+      <div class="status" id="updStatus"></div>
+      <div class="actions">
+        <button class="btn" type="button" id="updCheck">폴더 확인</button>
+        <button class="btn" type="button" id="updRollback">되돌리기</button>
+        <button class="btn primary" type="button" id="updApply">업데이트 적용</button>
+      </div>
+    </div>
     <div class="actions"><button class="btn" type="button" id="devClose">닫기</button></div>
   </div>
 </dialog>
 
 <div class="dlg-backdrop hidden" id="dlgBackdrop"></div>
-<script src="app.js?v=5"></script>
+<script src="outbox.js?v=8"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

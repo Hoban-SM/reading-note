@@ -152,3 +152,29 @@ dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
 dialog:not([open]){display:none}
 dialog.fb{position:fixed;left:50%;top:max(24px,env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:70;box-shadow:0 10px 40px rgba(0,0,0,.35);max-height:calc(100% - 48px);overflow:auto;margin:0}
 .dlg-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:65}
+
+.linkbtn{background:none;border:0;padding:0;color:var(--cloth);font:inherit;font-size:14px;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.note.editing{background:var(--surface);border:1px solid var(--cloth);border-radius:8px;padding:16px;margin:12px 0}
+.note.editing textarea.e-text{font-family:var(--serif);line-height:1.8;min-height:180px}
+.note.editing label.f small{color:var(--pencil);font-size:12px;margin-left:4px}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px;margin:4px 0 10px;cursor:pointer}
+.chk input{width:18px;height:18px;accent-color:var(--cloth)}
+.edit-actions{display:flex;gap:8px;justify-content:flex-end}
+.edited{font-size:12px;color:var(--pencil);margin-top:6px}
+
+.queue{border:1px solid var(--rule);background:var(--surface);border-radius:8px;padding:6px 14px;margin-bottom:18px}
+.q-head{font-size:13px;color:var(--pencil);padding:6px 0}
+.q-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--rule)}
+.q-main b{display:block;font-family:var(--serif);font-size:15px}
+.q-main span{display:block;font-size:12px;color:var(--pencil)}
+.q-main .q-err{color:var(--danger)}
+.q-side{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none;font-size:13px}
+.q-side em{font-style:normal;color:var(--pencil)}
+.q-sending .q-side em{color:var(--cloth);font-weight:600}
+.q-done .q-side em{color:var(--cloth);font-weight:600}
+.q-failed .q-side em,.q-needLogin .q-side em{color:var(--danger);font-weight:600}
+
+.upd{border-top:1px solid var(--rule);margin-top:16px;padding-top:12px}
+.upd h3{font-family:var(--serif);font-size:17px;margin:0 0 4px}
+.upd #updInfo{margin:8px 0 12px;line-height:1.6}
+.upd .actions{flex-wrap:wrap}

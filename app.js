@@ -20,85 +20,27 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   };
   // 이전 버전의 앱 키가 남아 있으면 삭제
   store.del('key');
-  const state = { photos:[], books:[], saving:false, filter:'', mode: store.get('mode','all') };
+  const state = { photos:[], books:[], saving:false, filter:'', mode: store.get('mode','all'), notes:{} };
 
   $('#today').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'});
 
-  /* ── 보안: 로그인 · 요청 서명 ── */
-  // 서명 키는 IndexedDB에 '추출 불가(non-extractable)' CryptoKey로만 보관 → 페이지 안의 스크립트도 키 값을 꺼낼 수 없음
-  const enc = new TextEncoder();
-  const hex = buf => Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2,'0')).join('');
-  const sha256Hex = async s => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
-  const GAS_URL_RE = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{20,}\/exec$/;
-
-  function idbOpen(){
-    return new Promise((res, rej) => {
-      const r = indexedDB.open('reading-note-secure', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('keys');
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-    });
-  }
-  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
-  async function idbDo(mode, fn){
-    if(!window.indexedDB) throw new Error('no idb');
-    const db = await withTimeout(idbOpen(), 3000);
-    return new Promise((res, rej) => {
-      const tx = db.transaction('keys', mode); const req = fn(tx.objectStore('keys'));
-      tx.oncomplete = () => { db.close(); res(req && req.result); };
-      tx.onerror = tx.onabort = () => { db.close(); rej(tx.error); };
-    });
-  }
-  let hmacKey = null, keyLoaded = false;
-  async function getKey(){
-    if(hmacKey || keyLoaded) return hmacKey;
-    keyLoaded = true;
-    try{ hmacKey = (await idbDo('readonly', s => s.get('hmac'))) || null; }catch(e){ hmacKey = null; }
-    return hmacKey;
-  }
-  async function saveToken(token){
-    hmacKey = await crypto.subtle.importKey('raw', enc.encode(token), { name:'HMAC', hash:'SHA-256' }, false, ['sign']);
-    keyLoaded = true;
-    try{ await idbDo('readwrite', s => s.put(hmacKey, 'hmac')); return true; }
-    catch(e){ return false; } // 사생활 보호 모드 등: 이번 세션에만 유지
-  }
-  async function clearLocalAuth(){
-    hmacKey = null; keyLoaded = true;
-    store.del('dev'); store.del('devName');
-    try{ renderLoginBanner(); }catch(e){}
-    try{ await idbDo('readwrite', s => s.delete('hmac')); }catch(e){}
-  }
+  /* ── 보안: 로그인 · 요청 서명 (공용 모듈 outbox.js) ── */
+  const RN = window.RN;
+  const GAS_URL_RE = RN.GAS_URL_RE;
+  const getKey = () => RN.getKey();
   const loggedIn = () => !!(store.get('url','') && store.get('dev',''));
-
-  async function post(url, body){
-    if(!GAS_URL_RE.test(url)) throw new Error('웹앱 URL 형식이 올바르지 않습니다.');
-    let res;
-    try{
-      res = await fetch(url, { method:'POST', body: JSON.stringify(body), credentials:'omit', cache:'no-store', referrerPolicy:'no-referrer', redirect:'follow' });
-    }catch(e){ throw new Error('서버에 연결하지 못했습니다. 인터넷 연결을 확인하세요.'); }
-    if(!res.ok) throw new Error('서버 응답 오류 ('+res.status+')');
-    try{ return await res.json(); }catch(e){ throw new Error('서버 응답을 읽지 못했습니다. 웹앱 배포 설정을 확인하세요.'); }
+  const post = RN.post;
+  async function clearLocalAuth(){
+    store.del('dev'); store.del('devName');
+    await RN.clearAuth();
+    try{ renderLoginBanner(); }catch(e){}
   }
-
-  let clockOffset = Number(store.get('skew','0')) || 0;
-  async function call(action, params, retry = true){
-    const url = store.get('url',''), dev = store.get('dev','');
-    const key = await getKey();
-    if(!url || !dev || !key){ needLogin(); throw new Error('로그인이 필요합니다.'); }
-    const payload = JSON.stringify(params || {});
-    const ts = Math.round(Date.now() + clockOffset);
-    const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
-    const msg = [dev, String(ts), nonce, action, await sha256Hex(payload)].join('\n');
-    const sig = hex(await crypto.subtle.sign('HMAC', key, enc.encode(msg)));
-    const j = await post(url, { action, deviceId: dev, ts, nonce, payload, sig });
-    if(!j.ok){
-      if(j.code === 'clock' && retry && j.serverTime){
-        clockOffset = j.serverTime - Date.now(); store.set('skew', String(clockOffset));
-        return call(action, params, false);
-      }
-      if(j.code === 'auth'){ await clearLocalAuth(); needLogin(); }
-      throw new Error(j.error || '처리 실패');
+  async function call(action, params){
+    try{ return await RN.call(action, params); }
+    catch(e){
+      if(e.code === 'auth'){ await clearLocalAuth(); needLogin(); }
+      throw e;
     }
-    return j;
   }
 
   /* ── 설정 · 기기 관리 ── */
@@ -154,8 +96,9 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       const r = await post(url, { action:'login', password: pw, deviceName: name });
       $('#cfgPw').value = '';
       if(!r.ok) throw new Error(r.error || '로그인 실패');
-      const persisted = await saveToken(r.token);
+      const persisted = await RN.setAuth(r.token, url, r.deviceId);
       store.set('url', url); store.set('dev', r.deviceId); store.set('devName', r.name);
+      await RN.resetNeedLogin(); flushQueue();
       setCfgStatus(persisted ? '로그인됐습니다.' : '로그인됐습니다. 이 브라우저는 키를 저장할 수 없어 앱을 닫으면 다시 로그인해야 합니다.');
       $('#loginForm').classList.add('hidden'); $('#devPanel').classList.remove('hidden');
       loadDevices(); refreshBooks(); renderLoginBanner();
@@ -163,7 +106,56 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     finally{ btn.disabled = false; }
   };
 
+  /* ── 서버 업데이트 (드라이브 폴더의 새 코드 적용) ── */
+  function setUpd(msg, err){ const s = $('#updStatus'); s.textContent = msg || ''; s.className = 'status' + (err ? ' err' : ''); }
+  async function loadUpdateInfo(){
+    const box = $('#updInfo');
+    box.textContent = '업데이트 폴더 확인 중…';
+    try{
+      const r = await call('updinfo', {});
+      const lines = [];
+      lines.push(r.code ? `새 코드: ${r.code.name} (${r.code.updated} 올림)` : '폴더에 새 Code.gs가 없습니다.');
+      if(r.manifest) lines.push(`설정 파일: ${r.manifest.name} (${r.manifest.updated})`);
+      if(r.last) lines.push(`마지막 업데이트: ${r.last}${r.current ? ' · 버전 ' + r.current : ''}`);
+      box.innerHTML = lines.map(esc).join('<br>');
+      $('#updApply').disabled = !r.code;
+      $('#updRollback').disabled = !r.canRollback;
+    }catch(e){
+      box.textContent = e.code === 'server' || /알 수 없는 요청/.test(e.message)
+        ? '서버가 아직 이 기능을 모릅니다. 처음 한 번은 PC에서 Code.gs를 바꿔야 합니다.'
+        : e.message;
+      $('#updApply').disabled = true; $('#updRollback').disabled = true;
+    }
+  }
+  $('#updCheck').onclick = loadUpdateInfo;
+  $('#updApply').onclick = async () => {
+    const pw = $('#updPw').value;
+    if(!pw){ setUpd('비밀번호를 입력하세요.', true); return; }
+    if(!confirm('드라이브 업데이트 폴더의 코드로 서버를 바꿀까요? 문제가 생기면 [되돌리기]로 복구할 수 있습니다.')) return;
+    const b = $('#updApply'); b.disabled = true; setUpd('적용 중… (20~40초)');
+    try{
+      const r = await call('selfupdate', { password: pw });
+      $('#updPw').value = '';
+      setUpd(`업데이트했습니다. 버전 ${r.previous} → ${r.version}${r.notice ? ' · ' + r.notice : ''}`);
+      setTimeout(loadUpdateInfo, 1500);
+    }catch(e){ setUpd(e.message, true); }
+    finally{ b.disabled = false; }
+  };
+  $('#updRollback').onclick = async () => {
+    const pw = $('#updPw').value;
+    if(!pw){ setUpd('비밀번호를 입력하세요.', true); return; }
+    if(!confirm('서버를 바로 전 버전으로 되돌릴까요?')) return;
+    const b = $('#updRollback'); b.disabled = true; setUpd('되돌리는 중…');
+    try{
+      const r = await call('rollback', { password: pw });
+      $('#updPw').value = '';
+      setUpd(`되돌렸습니다. 지금 버전 ${r.version}`);
+      setTimeout(loadUpdateInfo, 1500);
+    }catch(e){ setUpd(e.message, true); b.disabled = false; }
+  };
+
   async function loadDevices(){
+    loadUpdateInfo();
     const box = $('#devList'); box.innerHTML = '<div class="hint">기기 목록 불러오는 중…</div>';
     try{
       const r = await call('ping', {}).then(p => call('devices', {}).then(d => Object.assign(d, { gemini: p.gemini })));
@@ -295,7 +287,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
 
   /* ── 음성 메모 ── */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null, listening = false, baseText = '';
+  let rec = null, listening = false;
   const micBtn = $('#btnMic');
   if(!SR){
     micBtn.classList.add('hidden');
@@ -307,29 +299,82 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     micBtn.querySelector('.lbl').textContent = on ? '듣는 중 · 멈추기' : '말로 적기';
     if(!on) $('#interim').textContent = '';
   }
-  function startMic(){
-    rec = new SR(); rec.lang = 'ko-KR'; rec.continuous = true; rec.interimResults = true;
-    const memo = $('#memo');
-    baseText = memo.value ? memo.value.replace(/\s*$/, '') + (memo.value.trim() ? ' ' : '') : '';
-    let finals = '';
-    rec.onresult = ev => {
-      let interim = '';
-      for(let i = ev.resultIndex; i < ev.results.length; i++){
-        const t = ev.results[i][0].transcript;
-        if(ev.results[i].isFinal) finals += t.trim() + ' ';
-        else interim += t;
+  // 안드로이드 Chrome은 연속 듣기 모드에서 같은 말을 누적해서 여러 번 '확정'으로 보내는 문제가 있음
+  // → 안드로이드는 한 문장씩 듣고 자동으로 다시 시작, 모든 기기에서 겹치는 결과는 합쳐서 한 번만 적음
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  let userStop = false, committed = '', silentRounds = 0;
+  const joinText = (a, b) => b ? (a ? a + ' ' + b : b) : a;
+
+  // 결과 목록 전체를 매번 새로 계산 (앞 결과를 포함하는 더 긴 결과가 오면 교체)
+  function mergeResults(results){
+    const finals = []; let interim = '';
+    for(let i = 0; i < results.length; i++){
+      const t = results[i][0].transcript.replace(/\s+/g, ' ').trim();
+      if(!t) continue;
+      if(results[i].isFinal){
+        const last = finals[finals.length - 1];
+        if(last && t.startsWith(last)) finals[finals.length - 1] = t;
+        else if(last && last.startsWith(t)) { /* 이미 적은 말의 앞부분 → 무시 */ }
+        else finals.push(t);
+      } else {
+        interim = t;
       }
-      memo.value = (baseText + finals).trimEnd();
-      $('#interim').textContent = interim;
+    }
+    const fin = finals.join(' ');
+    const lastFin = finals[finals.length - 1] || '';
+    if(interim && fin && interim.startsWith(fin)) interim = interim.slice(fin.length).trim();
+    else if(interim && lastFin && interim.startsWith(lastFin)) interim = interim.slice(lastFin.length).trim();
+    return { fin, interim };
+  }
+
+  function startMic(){
+    const memo = $('#memo');
+    userStop = false; silentRounds = 0;
+    committed = memo.value.replace(/\s+$/, '');
+    memo.readOnly = true; // 듣는 동안 직접 입력과 섞이지 않게
+    listening = true; setMicUI(true); setStatus('');
+    startSession();
+  }
+
+  function startSession(){
+    const memo = $('#memo');
+    let sessionText = '';
+    rec = new SR();
+    rec.lang = 'ko-KR'; rec.interimResults = true; rec.maxAlternatives = 1;
+    rec.continuous = !isAndroid;
+    rec.onresult = ev => {
+      const m = mergeResults(ev.results);
+      sessionText = m.fin;
+      memo.value = joinText(committed, sessionText);
+      $('#interim').textContent = m.interim;
     };
     rec.onerror = ev => {
-      if(ev.error === 'not-allowed' || ev.error === 'service-not-allowed') setStatus('마이크 권한을 허용해 주세요. 브라우저 설정에서 바꿀 수 있습니다.', true);
-      else if(ev.error !== 'no-speech' && ev.error !== 'aborted') setStatus('음성 인식 오류: '+ev.error, true);
+      if(ev.error === 'not-allowed' || ev.error === 'service-not-allowed'){
+        userStop = true;
+        setStatus('마이크 권한을 허용해 주세요. 브라우저 설정에서 바꿀 수 있습니다.', true);
+      } else if(ev.error !== 'no-speech' && ev.error !== 'aborted'){
+        setStatus('음성 인식 오류: ' + ev.error, true);
+      }
     };
-    rec.onend = () => { listening = false; setMicUI(false); };
-    rec.start(); listening = true; setMicUI(true); setStatus('');
+    rec.onend = () => {
+      committed = joinText(committed, sessionText);
+      memo.value = committed;
+      $('#interim').textContent = '';
+      silentRounds = sessionText ? 0 : silentRounds + 1;
+      // 안드로이드: 사용자가 멈출 때까지 자동으로 이어 듣기 (조용한 상태가 3번 이어지면 자동 종료)
+      if(isAndroid && !userStop && silentRounds < 3){
+        try{ startSession(); return; }catch(e){}
+      }
+      listening = false; memo.readOnly = false; setMicUI(false);
+    };
+    try{ rec.start(); }
+    catch(e){ listening = false; memo.readOnly = false; setMicUI(false); setStatus('마이크를 시작하지 못했습니다. 잠시 후 다시 눌러 주세요.', true); }
   }
-  function stopMic(){ if(rec && listening){ rec.stop(); } }
+
+  function stopMic(){
+    userStop = true;
+    if(rec && listening){ try{ rec.stop(); }catch(e){} }
+  }
   micBtn.onclick = () => { listening ? stopMic() : startMic(); };
 
   /* ── 책 제목 / 저자 ── */
@@ -425,6 +470,8 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   /* ── 저장 ── */
   function setStatus(msg, err){ const s = $('#status'); s.textContent = msg||''; s.className = 'status'+(err?' err':''); }
 
+  const canBgSync = 'serviceWorker' in navigator && 'SyncManager' in window;
+
   $('#btnSave').onclick = async () => {
     if(state.saving) return;
     stopMic();
@@ -437,39 +484,117 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
 
     state.saving = true; $('#btnSave').disabled = true;
     try{
-      setStatus('사진 정리 중…');
+      setStatus('사진 준비 중… 잠깐만 기다려 주세요');
       const images = [];
       for(const p of state.photos){
         const out = await renderOut(p);
         images.push({ data: out.split(',')[1], mimeType:'image/jpeg', cropped: !!p.crop });
       }
-      setStatus(images.length ? `사진 ${images.length}장 올리고 글자 읽는 중… (10~40초)` : '저장 중…');
-      const r = await call('save', { book, author:$('#author').value.trim(), page:$('#page').value.trim(), memo, mode: state.mode, images });
+      // 먼저 휴대폰 안 대기열에 넣고 → 화면은 바로 비움 → 보내기는 뒤에서 진행
+      await RN.enqueue({ book, author:$('#author').value.trim(), page:$('#page').value.trim(), memo, mode: state.mode, images });
       store.set('lastBook', book);
-      $('#result').innerHTML = `<div class="done"><div class="head">No.${esc(r.no)} 저장했습니다</div>${noteHtml(Object.assign({ memo }, r))}</div>`;
       state.photos = []; renderThumbs();
       $('#memo').value = ''; $('#page').value = '';
-      setStatus('');
-      window.scrollTo({ top:0, behavior:'smooth' });
-      refreshBooks();
+      setStatus(canBgSync
+        ? '저장 대기열에 넣었습니다. 이제 창을 닫아도 뒤에서 끝까지 올립니다.'
+        : '저장 대기열에 넣었습니다. 올라가는 동안 창을 열어 두면 가장 빠릅니다. 닫아도 다음에 열 때 이어서 올립니다.');
+      await renderQueue();
+      requestBgSync();
+      flushQueue();
     }catch(e){
-      setStatus(e.message, true);
+      setStatus('대기열에 넣지 못했습니다: ' + e.message, true);
     }finally{
       state.saving = false; $('#btnSave').disabled = false;
     }
   };
 
+  /* ── 저장 대기열 화면 ── */
+  const STATUS_LABEL = { pending:'대기 중', sending:'올리는 중…', done:'저장 완료', failed:'실패', needLogin:'로그인 필요' };
+  let flushing = false, shownDone = new Set();
+
+  async function renderQueue(){
+    const items = (await RN.list()).filter(it => !(it.status === 'done' && it.seen));
+    const box = $('#queue');
+    if(!items.length){ box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    const waiting = items.filter(it => it.status !== 'done' && it.status !== 'failed').length;
+    box.innerHTML = `<div class="q-head">${waiting ? `보낼 기록 ${waiting}건` : '보내기 완료'}</div>` + items.map(it => `
+      <div class="q-row q-${esc(it.status)}" data-cid="${esc(it.cid)}">
+        <div class="q-main"><b>${esc(it.label.book || '제목 없음')}</b><span>${it.label.page ? 'p.'+esc(it.label.page)+' · ' : ''}사진 ${esc(it.label.photos)}장 · ${esc(new Date(it.created).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}))}</span>
+          ${it.error && it.status !== 'done' ? `<span class="q-err">${esc(it.error)}</span>` : ''}</div>
+        <div class="q-side"><em>${esc(it.status === 'done' && it.result ? 'No.'+it.result.no+' 저장' : STATUS_LABEL[it.status] || it.status)}</em>
+          ${it.status === 'failed' || it.status === 'pending' ? `<button type="button" class="linkbtn q-retry">다시 보내기</button>` : ''}
+          ${it.status === 'failed' ? `<button type="button" class="linkbtn q-del">삭제</button>` : ''}
+          ${it.status === 'done' ? `<button type="button" class="linkbtn q-ok">확인</button>` : ''}</div>
+      </div>`).join('');
+    box.querySelectorAll('.q-retry').forEach(b => b.onclick = async () => {
+      const it = await RN.getItem(b.closest('.q-row').dataset.cid);
+      if(it){ it.status = 'pending'; it.error = ''; await RN.putItem(it); }
+      await renderQueue(); flushQueue();
+    });
+    box.querySelectorAll('.q-del').forEach(b => b.onclick = async () => {
+      if(!confirm('이 기록을 대기열에서 지울까요? 아직 구글에 저장되지 않은 기록입니다.')) return;
+      await RN.removeItem(b.closest('.q-row').dataset.cid); renderQueue();
+    });
+    box.querySelectorAll('.q-ok').forEach(b => b.onclick = async () => {
+      const it = await RN.getItem(b.closest('.q-row').dataset.cid);
+      if(it){ it.seen = true; await RN.putItem(it); }
+      renderQueue();
+    });
+    // 새로 완료된 기록은 결과 카드로 보여 주고, 대기열 목록에서는 정리
+    let changed = false;
+    for(const it of items){
+      if(it.status === 'done' && it.result && !shownDone.has(it.cid)){
+        shownDone.add(it.cid);
+        it.seen = true; await RN.putItem(it); changed = true;
+        const r = it.result;
+        const saved = Object.assign({ memo: r.memo }, r);
+        if(r.id) state.notes[r.id] = saved;
+        $('#result').innerHTML = `<div class="done"><div class="head">No.${esc(r.no)} 저장했습니다</div>${noteHtml(saved)}</div>`;
+        refreshBooks();
+      }
+    }
+    if(changed) setTimeout(renderQueue, 1500);
+  }
+
+  async function flushQueue(){
+    if(flushing || !loggedIn()) return;
+    flushing = true;
+    try{ await RN.flush(() => renderQueue()); }
+    catch(e){}
+    finally{ flushing = false; renderQueue(); }
+  }
+
+  async function requestBgSync(){
+    if(!canBgSync) return;
+    try{ const reg = await navigator.serviceWorker.ready; await reg.sync.register('rn-outbox'); }catch(e){}
+  }
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js?v=8').catch(() => {});
+    navigator.serviceWorker.addEventListener('message', e => { if(e.data && e.data.type === 'outbox-updated') renderQueue(); });
+  }
+  window.addEventListener('online', flushQueue);
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible'){ renderQueue(); flushQueue(); } });
+  setInterval(async () => { if(document.visibilityState === 'visible' && await RN.hasUnsent()) flushQueue(); }, 30000);
+  // 백그라운드 전송이 안 되는 브라우저에서 아직 보낼 게 남았으면 닫기 전에 한 번 묻기
+  window.addEventListener('beforeunload', e => {
+    if(canBgSync) return;
+    const q = document.querySelector('#queue .q-pending, #queue .q-sending');
+    if(q){ e.preventDefault(); e.returnValue = ''; }
+  });
+
   /* ── 노트 표시 ── */
-  const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  // 구글 문서·드라이브 링크만 허용 (javascript: 등 차단)
-  const safeLink = u => /^https:\/\/(docs|drive)\.google\.com\/[^\s"'<>]*$/.test(String(u||'')) ? String(u) : '';
-  const safeImg = u => /^https:\/\/[^\s"'<>]+$/.test(String(u||'')) ? String(u) : '';
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // 구글 문서·드라이브 링크만 허용 (javascript:, 피싱 주소 등 차단)
+  const safeLink = u => /^https:\/\/(docs|drive)\.google\.com\/[^\s"'<>]*$/.test(String(u || '')) ? String(u) : '';
+  const safeImg = u => /^https:\/\/[^\s"'<>]+$/.test(String(u || '')) ? String(u) : '';
   function noteHtml(n){
     const quotes = (n.quotes||[]).filter(Boolean);
     const kws = (n.keywords||[]).filter(k => k && k.word);
     const tags = (n.tags||[]).filter(Boolean);
     const photos = (n.photoUrls||[]).filter(Boolean);
-    return `<article class="note">
+    return `<article class="note"${n.id ? ` data-id="${esc(n.id)}"` : ''}>
       <div class="meta"><span>${n.no?`<span class="no">No.${esc(n.no)}</span>&nbsp; `:''}${esc(n.date)}${n.page?' · p.'+esc(n.page):''}</span><span>${esc(n.mode||'')}</span></div>
       <h3>${esc(n.book)}${n.author?`<small>${esc(n.author)}</small>`:''}</h3>
       ${n.text?`<div class="sec">캡처 내용</div><div class="capture">${esc(n.text)}</div>`:''}
@@ -479,13 +604,70 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       ${n.memo?`<div class="sec">내 생각</div><div class="memo">${esc(n.memo)}</div>`:''}
       ${tags.length?`<div class="tags">${tags.map(t=>`<span>#${esc(t)}</span>`).join('')}</div>`:''}
       <div class="links">
+        ${n.id ? `<button type="button" class="linkbtn edit-note" data-id="${esc(n.id)}">✎ 편집</button>` : ''}
         ${safeLink(n.masterUrl)?`<a href="${esc(safeLink(n.masterUrl))}" target="_blank" rel="noopener noreferrer">전체 기록 문서</a>`:''}
         ${safeLink(n.docUrl)?`<a href="${esc(safeLink(n.docUrl))}" target="_blank" rel="noopener noreferrer">책별 정리 문서</a>`:''}
         ${photos.map(safeLink).filter(Boolean).map((u,i)=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">사진 ${i+1}</a>`).join('')}
       </div>
       ${n.notice?`<div class="notice">${esc(n.notice)}</div>`:''}
+      ${n.edited?`<div class="edited">${esc(n.edited)} 수정됨</div>`:''}
       ${n.warning?`<div class="warn">${esc(n.warning)}</div>`:''}
     </article>`;
+  }
+
+  /* ── 기록 편집 ── */
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.edit-note');
+    if(b) openEdit(b.closest('article'), b.dataset.id);
+  });
+
+  function openEdit(art, id){
+    const n = state.notes[id];
+    if(!art || !n) return;
+    art.classList.add('editing');
+    art.innerHTML = `
+      <div class="meta"><span>${n.no?`<span class="no">No.${esc(n.no)}</span>&nbsp; `:''}${esc(n.date)}</span><span>편집 중</span></div>
+      <h3>${esc(n.book)}</h3>
+      <div class="field"><label class="f">페이지</label><input type="text" class="e-page" inputmode="numeric" maxlength="20"></div>
+      <div class="field"><label class="f">캡처 내용 <small>잘못 읽힌 글자를 고치거나 필요 없는 부분을 지우세요</small></label><textarea class="e-text"></textarea></div>
+      <div class="field"><label class="f">내 생각</label><textarea class="e-memo" maxlength="5000"></textarea></div>
+      <label class="chk"><input type="checkbox" class="e-regen"> 고친 내용으로 요약·주요 단어 다시 만들기</label>
+      <div class="status e-status"></div>
+      <div class="edit-actions">
+        <button type="button" class="btn e-cancel">취소</button>
+        <button type="button" class="btn primary e-save">수정 저장</button>
+      </div>`;
+    // 값은 innerHTML이 아니라 value로 넣어 특수문자·줄바꿈을 그대로 유지
+    art.querySelector('.e-page').value = n.page || '';
+    art.querySelector('.e-text').value = n.text || '';
+    art.querySelector('.e-memo').value = n.memo || '';
+    const ta = art.querySelector('.e-text');
+    ta.style.height = Math.min(480, Math.max(180, ta.scrollHeight + 4)) + 'px';
+    art.scrollIntoView({ behavior:'smooth', block:'start' });
+
+    const restore = note => {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = noteHtml(note);
+      art.replaceWith(wrap.firstElementChild);
+    };
+    art.querySelector('.e-cancel').onclick = () => restore(n);
+    art.querySelector('.e-save').onclick = async () => {
+      const btn = art.querySelector('.e-save'), st = art.querySelector('.e-status');
+      const regen = art.querySelector('.e-regen').checked;
+      btn.disabled = true; st.className = 'status e-status';
+      st.textContent = regen ? '저장하고 요약 다시 만드는 중… (10~20초)' : '저장 중…';
+      try{
+        const r = await call('update', {
+          id, page: art.querySelector('.e-page').value.trim(),
+          text: art.querySelector('.e-text').value, memo: art.querySelector('.e-memo').value.trim(), regen
+        });
+        const updated = Object.assign({}, n, r.note, { warning: r.warning || '', notice: '수정 내용을 시트와 문서에 반영했습니다.' });
+        state.notes[id] = Object.assign({}, updated, { warning:'', notice:'' });
+        restore(updated);
+      }catch(e){
+        st.className = 'status e-status err'; st.textContent = e.message; btn.disabled = false;
+      }
+    };
   }
 
   /* ── 모아보기 ── */
@@ -498,7 +680,8 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       setBooks(r.books); renderShelf();
       const ml = $('#masterLink');
       if(safeLink(r.masterUrl)){ ml.href = safeLink(r.masterUrl); ml.classList.remove('hidden'); }
-      box.innerHTML = r.notes.length ? r.notes.map(noteHtml).join('')
+      r.notes.forEach(n => { if(n.id) state.notes[n.id] = Object.assign({ masterUrl: r.masterUrl }, n); });
+      box.innerHTML = r.notes.length ? r.notes.map(n => noteHtml(state.notes[n.id] || n)).join('')
         : '<div class="empty">아직 기록이 없습니다. 읽던 페이지를 찍어 첫 노트를 남겨 보세요.</div>';
     }catch(e){ box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   }
@@ -522,7 +705,10 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   renderLoginBanner();
   (async () => {
     try{
+      if(loggedIn() && !(await RN.getAuth()) && await getKey()) await RN.setMeta(store.get('url',''), store.get('dev',''));
       if(!loggedIn() || !(await getKey())) setTimeout(openSettings, 300); else refreshBooks();
+      await renderQueue();
+      flushQueue();
     }catch(e){ setStatus('시작 오류: ' + e.message, true); }
   })();
 })();
