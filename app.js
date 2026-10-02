@@ -43,10 +43,16 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     await RN.clearAuth();
     try{ renderLoginBanner(); }catch(e){}
   }
+  const SERVER_VERSION = '2026-10-03';   // 이 앱이 기대하는 서버(Code.gs) 버전
   async function call(action, params){
     try{ return await RN.call(action, params); }
     catch(e){
       if(e.code === 'auth'){ await clearLocalAuth(); needLogin(); }
+      // 서버(Code.gs)가 옛 버전이라 새 기능을 모를 때: 무엇을 해야 하는지 알려 줌
+      if(e.code === 'unknown' || /알 수 없는 요청/.test(e.message)){
+        const x = new Error('서버(Apps Script)가 아직 옛 버전입니다. 편집기에서 최신 Code.gs로 바꾼 뒤 [배포 → 배포 관리 → 연필 → 버전: 새 버전 → 배포]를 해 주세요.');
+        x.code = 'oldserver'; throw x;
+      }
       throw e;
     }
   }
@@ -166,8 +172,11 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     loadUpdateInfo();
     const box = $('#devList'); box.innerHTML = '<div class="hint">기기 목록 불러오는 중…</div>';
     try{
-      const r = await call('ping', {}).then(p => call('devices', {}).then(d => Object.assign(d, { gemini: p.gemini })));
-      $('#devInfo').textContent = (r.gemini ? 'AI 정리 사용 중' : '글자 추출만 사용 중 (Gemini 키 없음)');
+      const r = await call('ping', {}).then(p => call('devices', {}).then(d => Object.assign(d, { gemini: p.gemini, version: p.version })));
+      const ver = r.version || '';
+      $('#devInfo').innerHTML = esc(r.gemini ? 'AI 정리 사용 중' : '글자 추출만 사용 중 (Gemini 키 없음)') + '<br>' +
+        (ver === SERVER_VERSION ? esc('서버 버전 ' + ver + ' · 최신')
+          : `<span class="q-err">${esc('서버 버전 ' + (ver || '확인 안 됨') + ' · 업데이트 필요 (앱은 ' + SERVER_VERSION + '용)')}</span>`);
       box.innerHTML = r.devices.map(d => `<div class="dev"><div><b>${esc(d.name)}${d.current ? ' <em>이 기기</em>' : ''}</b><span>마지막 사용 ${esc(d.lastUsed)} · 만료 ${esc(d.expires)}</span></div><button type="button" class="btn" data-id="${esc(d.id)}">${d.current ? '로그아웃' : '해제'}</button></div>`).join('');
       box.querySelectorAll('button[data-id]').forEach(b => b.onclick = async () => {
         const self = b.textContent === '로그아웃';
@@ -755,6 +764,9 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       const regen = art.querySelector('.e-regen').checked;
       btn.disabled = true; st.className = 'status e-status';
       st.textContent = regen ? '저장하고 요약 다시 만드는 중… (10~20초)' : '저장 중…';
+      // 오래 걸리면 지금 무엇을 하는지 알려 줌
+      const slow = setTimeout(() => { st.textContent = '시트와 문서 두 곳을 고치는 중… 조금만 기다려 주세요.'; }, 6000);
+      const slower = setTimeout(() => { st.textContent = '다른 저장이 끝나길 기다리는 중일 수 있습니다. 창을 닫지 말고 기다려 주세요.'; }, 20000);
       try{
         const r = await call('update', {
           id, page: art.querySelector('.e-page').value.trim(),
@@ -764,7 +776,11 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
         state.notes[id] = Object.assign({}, updated, { warning:'', notice:'' });
         restore(updated);
       }catch(e){
-        st.className = 'status e-status err'; st.textContent = e.message; btn.disabled = false;
+        st.className = 'status e-status err';
+        st.textContent = e.code === 'busy' ? e.message : '수정하지 못했습니다: ' + e.message + ' — 고친 내용은 그대로 있으니 다시 눌러 주세요.';
+        btn.disabled = false;
+      }finally{
+        clearTimeout(slow); clearTimeout(slower);
       }
     };
   }
