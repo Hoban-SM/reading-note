@@ -178,3 +178,27 @@ dialog.fb{position:fixed;left:50%;top:max(24px,env(safe-area-inset-top,0px));tra
 .upd h3{font-family:var(--serif);font-size:17px;margin:0 0 4px}
 .upd #updInfo{margin:8px 0 12px;line-height:1.6}
 .upd .actions{flex-wrap:wrap}
+
+nav{gap:20px}
+.wish-here{display:block;margin:-6px 0 10px}
+textarea.short{min-height:70px}
+.btn.wide{width:100%}
+.wishform{border:1px solid var(--rule);background:var(--surface);border-radius:8px;padding:14px 14px 16px;margin-bottom:20px}
+.wishform input[type=text],.wishform textarea{background:var(--paper)}
+#wishFilter{margin-bottom:4px}
+.wish{display:grid;grid-template-columns:30px 1fr auto;gap:10px;align-items:start;padding:14px 0;border-bottom:1px solid var(--rule)}
+.wcheck{position:relative;width:26px;height:26px;margin-top:2px;cursor:pointer}
+.wcheck input{position:absolute;opacity:0;width:26px;height:26px;margin:0;cursor:pointer}
+.wcheck span{display:block;width:24px;height:24px;border:2px solid var(--cloth);border-radius:6px}
+.wcheck input:checked+span{background:var(--cloth)}
+.wcheck input:checked+span::after{content:'';position:absolute;left:9px;top:4px;width:6px;height:12px;border:solid var(--on-cloth);border-width:0 3px 3px 0;transform:rotate(45deg)}
+.wcheck input:focus-visible+span{outline:2px solid var(--cloth);outline-offset:2px}
+.wbody b{display:block;font-size:16px;line-height:1.35}
+.wbody span{display:block;font-size:13px;color:var(--pencil);margin-top:2px}
+.wbody .wfrom{color:var(--cloth)}
+.wbody p{margin:6px 0 0;font-size:14px;line-height:1.6;white-space:pre-wrap}
+.wbody .wmeta{font-size:12px;margin-top:6px}
+.wish.is-read .wbody b{text-decoration:line-through;text-decoration-color:var(--pencil);color:var(--pencil)}
+.wact{display:flex;flex-direction:column;align-items:flex-end;gap:8px;font-size:13px}
+.wact .linkbtn{font-size:13px}
+.wact .w-del{color:var(--pencil)}

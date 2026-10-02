@@ -12,8 +12,8 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📖%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=9">
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=12">
 </head>
 <body>
 <div class="wrap">
@@ -30,6 +30,7 @@
   <nav role="tablist">
     <button role="tab" aria-selected="true" data-tab="write">기록하기</button>
     <button role="tab" aria-selected="false" data-tab="list">모아보기</button>
+    <button role="tab" aria-selected="false" data-tab="wish">읽을 책</button>
   </nav>
 
   <div class="banner hidden" id="loginBanner">
@@ -69,7 +70,7 @@
 
     <div class="field">
       <label class="f">읽을 부분</label>
-      <div class="seg" role="group" aria-label="읽을 부분">
+      <div class="seg" id="modeSeg" role="group" aria-label="읽을 부분">
         <button type="button" data-mode="all" aria-pressed="true">전체 글자</button>
         <button type="button" data-mode="marked" aria-pressed="false">밑줄·형광펜만</button>
       </div>
@@ -98,6 +99,36 @@
       <textarea id="memo" placeholder="이 부분을 읽고 든 생각. 마이크를 누르고 말해도 됩니다."></textarea>
       <div class="interim" id="interim"></div>
     </div>
+    <button type="button" class="linkbtn wish-here" id="btnWishHere">＋ 이 책에서 추천한 책 메모하기</button>
+  </section>
+
+  <section id="tab-wish" class="hidden">
+    <div class="wishform">
+      <div class="field">
+        <label class="f" for="wTitle">추천받은 책</label>
+        <input type="text" id="wTitle" class="book" placeholder="예: 총, 균, 쇠" autocomplete="off" maxlength="100">
+        <div class="lookup hidden" id="wLookup"></div>
+      </div>
+      <div class="field row">
+        <div><label class="f" for="wAuthor">저자</label><input type="text" id="wAuthor" autocomplete="off" maxlength="100"></div>
+        <div><label class="f" for="wFromPage">페이지</label><input type="text" id="wFromPage" inputmode="numeric" maxlength="20"></div>
+      </div>
+      <div class="field">
+        <label class="f" for="wFrom">어느 책에서 추천받았나요</label>
+        <input type="text" id="wFrom" list="bookList" placeholder="지금 읽는 책" autocomplete="off" maxlength="100">
+      </div>
+      <div class="field">
+        <label class="f" for="wMemo">메모</label>
+        <textarea id="wMemo" class="short" maxlength="1000" placeholder="왜 읽고 싶은지, 책에서 어떻게 소개됐는지"></textarea>
+      </div>
+      <div class="status" id="wStatus"></div>
+      <button class="btn primary wide" type="button" id="wAdd">목록에 추가</button>
+    </div>
+    <div class="seg" id="wishFilter" role="group" aria-label="목록 보기">
+      <button type="button" data-f="todo" aria-pressed="true">읽을 책</button>
+      <button type="button" data-f="done" aria-pressed="false">읽은 책</button>
+    </div>
+    <div id="wishList"></div>
   </section>
 
   <section id="tab-list" class="hidden">
@@ -169,6 +200,6 @@
 
 <div class="dlg-backdrop hidden" id="dlgBackdrop"></div>
 <script src="outbox.js?v=8"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

@@ -185,15 +185,18 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
     document.querySelectorAll('nav button').forEach(x => x.setAttribute('aria-selected', x===b));
     const t = b.dataset.tab;
-    $('#tab-write').classList.toggle('hidden', t!=='write');
-    $('#tab-list').classList.toggle('hidden', t!=='list');
+    ['write','list','wish'].forEach(x => $('#tab-'+x).classList.toggle('hidden', t!==x));
     $('#savebar').classList.toggle('hidden', t!=='write');
-    if(t==='list'){ stopMic(); loadList(); }
+    if(t!=='write') stopMic();
+    if(t==='list') loadList();
+    if(t==='wish') loadWish();
+    window.scrollTo(0, 0);
   });
+  const switchTab = name => $(`nav button[data-tab="${name}"]`).click();
 
   /* ── 읽기 방식 ── */
-  function renderMode(){ document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode===state.mode)); }
-  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => { state.mode = b.dataset.mode; store.set('mode', state.mode); renderMode(); });
+  function renderMode(){ document.querySelectorAll('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode===state.mode)); }
+  document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => { state.mode = b.dataset.mode; store.set('mode', state.mode); renderMode(); });
   renderMode();
 
   /* ── 사진 ── */
@@ -677,6 +680,126 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       }
     };
   }
+
+  /* ── 읽을 책 (추천도서 메모) ── */
+  state.wish = { items: [], filter: 'todo', loaded: false };
+  const wSet = (msg, err) => { const s = $('#wStatus'); s.textContent = msg || ''; s.className = 'status' + (err ? ' err' : ''); };
+
+  // 기록하기 화면에서 바로 메모: 지금 읽는 책·페이지를 '추천받은 곳'으로 채움
+  $('#btnWishHere').onclick = () => {
+    const from = cleanTitle($('#book').value), page = $('#page').value.trim();
+    switchTab('wish');
+    if(from) $('#wFrom').value = from;
+    if(page) $('#wFromPage').value = page;
+    setTimeout(() => $('#wTitle').focus(), 50);
+  };
+
+  async function loadWish(){
+    if(!loggedIn()){ $('#wishList').innerHTML = '<div class="empty">설정에서 로그인하면 목록이 보입니다.</div>'; return; }
+    if(!state.wish.loaded) $('#wishList').innerHTML = '<div class="empty">불러오는 중…</div>';
+    try{
+      const r = await call('wishlist', {});
+      state.wish.items = r.items; state.wish.loaded = true; renderWish();
+    }catch(e){ $('#wishList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+
+  function renderWish(){
+    const all = state.wish.items, f = state.wish.filter;
+    const todo = all.filter(i => !i.read), done = all.filter(i => i.read);
+    $('#wishFilter').querySelector('[data-f="todo"]').textContent = `읽을 책 ${todo.length}`;
+    $('#wishFilter').querySelector('[data-f="done"]').textContent = `읽은 책 ${done.length}`;
+    $('#wishFilter').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.f === f));
+    const list = f === 'done' ? done : todo;
+    $('#wishList').innerHTML = list.length ? list.map(i => `
+      <div class="wish${i.read ? ' is-read' : ''}" data-id="${esc(i.id)}">
+        <label class="wcheck" aria-label="${esc(i.title)} 읽음 표시"><input type="checkbox" ${i.read ? 'checked' : ''}><span></span></label>
+        <div class="wbody">
+          <b>${esc(i.title)}</b>
+          ${i.author ? `<span>${esc(i.author)}</span>` : ''}
+          ${i.from ? `<span class="wfrom">「${esc(i.from)}」${i.fromPage ? ' p.' + esc(i.fromPage) : ''}에서 추천</span>` : ''}
+          ${i.memo ? `<p>${esc(i.memo)}</p>` : ''}
+          <span class="wmeta">${esc(i.added)} 메모${i.read && i.readDate ? ' · ' + esc(i.readDate) + ' 읽음' : ''}${i.records ? ' · 독서노트 기록 ' + esc(i.records) + '개' : ''}</span>
+        </div>
+        <div class="wact">
+          <button type="button" class="linkbtn w-start">${i.records ? '이어서 기록' : '기록 시작'}</button>
+          <button type="button" class="linkbtn w-del">삭제</button>
+        </div>
+      </div>`).join('')
+      : `<div class="empty">${f === 'done' ? '읽음으로 체크한 책이 아직 없습니다.' : '책을 읽다 추천받은 책이 있으면 위에 적어 두세요.'}</div>`;
+
+    $('#wishList').querySelectorAll('.wish').forEach(el => {
+      const id = el.dataset.id, item = all.find(x => x.id === id);
+      el.querySelector('input[type=checkbox]').onchange = async e => {
+        const read = e.target.checked;
+        item.read = read; el.classList.toggle('is-read', read);
+        try{
+          const r = await call('wishupdate', { id, read });
+          state.wish.items = r.items;
+          setTimeout(renderWish, 350); // 체크 표시를 잠깐 보여 준 뒤 목록 이동
+        }catch(err){ e.target.checked = !read; item.read = !read; el.classList.toggle('is-read', !read); alert(err.message); }
+      };
+      el.querySelector('.w-del').onclick = async () => {
+        if(!confirm(`「${item.title}」을(를) 목록에서 지울까요?`)) return;
+        try{ const r = await call('wishupdate', { id, del: true }); state.wish.items = r.items; renderWish(); }
+        catch(err){ alert(err.message); }
+      };
+      el.querySelector('.w-start').onclick = () => {
+        switchTab('write');
+        $('#book').value = item.title; $('#author').value = item.author || '';
+        updateTitleHint(); renderChips(); hideLookup();
+      };
+    });
+  }
+
+  $('#wishFilter').querySelectorAll('button').forEach(b => b.onclick = () => { state.wish.filter = b.dataset.f; renderWish(); });
+
+  $('#wAdd').onclick = async () => {
+    const title = cleanTitle($('#wTitle').value);
+    if(!title){ wSet('책 제목을 입력하세요.', true); $('#wTitle').focus(); return; }
+    if(!loggedIn()){ openSettings(); return; }
+    const b = $('#wAdd'); b.disabled = true; wSet('추가하는 중…');
+    try{
+      const r = await call('wishadd', { title, author: $('#wAuthor').value.trim(), from: $('#wFrom').value.trim(), fromPage: $('#wFromPage').value.trim(), memo: $('#wMemo').value.trim() });
+      if(r.dup){ wSet(r.notice, true); return; }
+      state.wish.items = r.items; state.wish.filter = 'todo'; renderWish();
+      ['#wTitle','#wAuthor','#wFromPage','#wMemo'].forEach(s => $(s).value = '');
+      wHideLookup();
+      wSet(`「${title}」을(를) 읽을 책에 추가했습니다.`);
+    }catch(e){ wSet(e.message, true); }
+    finally{ b.disabled = false; }
+  };
+
+  // 제목을 쓰면 저자 후보 찾기 (기록하기 화면과 같은 검색 사용)
+  let wTimer = null, wLast = '', wSeq = 0;
+  const wHideLookup = () => { $('#wLookup').classList.add('hidden'); $('#wLookup').innerHTML = ''; };
+  $('#wAuthor').addEventListener('input', () => { if($('#wAuthor').value.trim()) wHideLookup(); });
+  $('#wTitle').addEventListener('input', () => {
+    clearTimeout(wTimer);
+    const t = cleanTitle($('#wTitle').value);
+    if(t.length < 2 || $('#wAuthor').value.trim() || !loggedIn()){ wHideLookup(); return; }
+    if(t === wLast) return;
+    wTimer = setTimeout(async () => {
+      wLast = t; const seq = ++wSeq, box = $('#wLookup');
+      box.innerHTML = '<div class="lh"><span>저자 찾는 중…</span></div>'; box.classList.remove('hidden');
+      try{
+        const r = await call('lookup', { q: t });
+        if(seq !== wSeq) return;
+        if(!r.items.length){ box.innerHTML = '<div class="lh"><span>검색 결과가 없습니다. 저자를 직접 적어 주세요.</span><button type="button" data-x>닫기</button></div>'; }
+        else{
+          box.innerHTML = '<div class="lh"><span>이 책인가요?</span><button type="button" data-x>닫기</button></div>' + r.items.map((it, i) => `
+            <button type="button" class="cand" data-i="${i}">
+              ${safeImg(it.thumbnail) ? `<img src="${esc(safeImg(it.thumbnail))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
+              <div><b>${esc(it.fullTitle || it.title)}</b><span>${esc(it.authors || '저자 정보 없음')}</span><span>${esc([it.publisher, it.year].filter(Boolean).join(' · '))}</span></div>
+            </button>`).join('');
+          box.querySelectorAll('.cand').forEach(el => el.onclick = () => {
+            const it = r.items[+el.dataset.i];
+            $('#wTitle').value = it.title; $('#wAuthor').value = it.authors; wLast = it.title; wHideLookup();
+          });
+        }
+        const x = box.querySelector('[data-x]'); if(x) x.onclick = wHideLookup;
+      }catch(e){ if(seq === wSeq) wHideLookup(); }
+    }, 700);
+  });
 
   /* ── 모아보기 ── */
   async function loadList(){
