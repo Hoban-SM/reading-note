@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=12">
+<link rel="stylesheet" href="app.css?v=15">
 </head>
 <body>
 <div class="wrap">
@@ -45,7 +45,8 @@
     <div class="field">
       <label class="f" for="book">책 제목</label>
       <div class="titlebox">
-        <input type="text" id="book" class="book" list="bookList" placeholder="예: 사피엔스" autocomplete="off">
+        <input type="text" id="book" class="book" list="bookList" placeholder="예: 사피엔스" autocomplete="off" enterkeyhint="search">
+        <button class="btn icon" id="btnFind" type="button" aria-label="책 검색"></button>
         <button class="btn" id="btnCover" type="button" aria-label="표지를 찍어 제목 입력">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>
           표지로
@@ -106,7 +107,10 @@
     <div class="wishform">
       <div class="field">
         <label class="f" for="wTitle">추천받은 책</label>
-        <input type="text" id="wTitle" class="book" placeholder="예: 총, 균, 쇠" autocomplete="off" maxlength="100">
+        <div class="titlebox two">
+          <input type="text" id="wTitle" class="book" placeholder="예: 총, 균, 쇠" autocomplete="off" maxlength="100" enterkeyhint="search">
+          <button class="btn icon" id="wFind" type="button" aria-label="책 검색"></button>
+        </div>
         <div class="lookup hidden" id="wLookup"></div>
       </div>
       <div class="field row">
@@ -199,7 +203,7 @@
 </dialog>
 
 <div class="dlg-backdrop hidden" id="dlgBackdrop"></div>
-<script src="outbox.js?v=8"></script>
-<script src="app.js?v=12"></script>
+<script src="outbox.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

@@ -202,3 +202,15 @@ textarea.short{min-height:70px}
 .wact{display:flex;flex-direction:column;align-items:flex-end;gap:8px;font-size:13px}
 .wact .linkbtn{font-size:13px}
 .wact .w-del{color:var(--pencil)}
+
+.titlebox{grid-template-columns:1fr auto auto}
+.titlebox.two{grid-template-columns:1fr auto}
+.titlebox .btn.icon{padding:0 13px;color:var(--cloth)}
+.titlebox .btn.icon svg{width:22px;height:22px}
+
+.done.skip{border-color:var(--marker)}
+.done.skip .head{color:var(--ink)}
+
+.edit-actions .grow{flex:1}
+.btn.danger{color:var(--danger);border-color:var(--danger);background:transparent}
+.deleted-msg{padding:14px 0;border-bottom:1px solid var(--rule)}

@@ -404,14 +404,17 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     lookupTimer = setTimeout(() => runLookup(t), 700);
   }
   function hideLookup(){ $('#lookup').classList.add('hidden'); $('#lookup').innerHTML = ''; }
-  async function runLookup(t){
-    lastQuery = t; const seq = ++lookupSeq;
-    const box = $('#lookup');
-    box.innerHTML = '<div class="lh"><span>저자 찾는 중…</span></div>'; box.classList.remove('hidden');
+  // 책 검색 공용: 결과 상자에 후보를 보여 주고, 고르면 onPick(item)
+  const lookupSeqs = {};
+  const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
+  async function bookSearch(box, q, onPick){
+    const key = box.id, seq = (lookupSeqs[key] = (lookupSeqs[key] || 0) + 1);
+    const close = () => { box.classList.add('hidden'); box.innerHTML = ''; };
+    box.innerHTML = '<div class="lh"><span>책 찾는 중…</span></div>'; box.classList.remove('hidden');
     try{
-      const r = await call('lookup', { q: t });
-      if(seq !== lookupSeq) return;
-      if(!r.items.length){
+      const r = await call('lookup', { q });
+      if(seq !== lookupSeqs[key]) return;
+      if(!r.items || !r.items.length){
         box.innerHTML = `<div class="lh"><span>${esc(r.error || '검색 결과가 없습니다. 저자를 직접 입력해 주세요.')}</span><button type="button" data-x>닫기</button></div>`;
       }else{
         box.innerHTML = `<div class="lh"><span>이 책인가요? 누르면 제목과 저자가 채워집니다</span><button type="button" data-x>닫기</button></div>` +
@@ -419,17 +422,32 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
             ${safeImg(it.thumbnail) ? `<img src="${esc(safeImg(it.thumbnail))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
             <div><b>${esc(it.fullTitle || it.title)}</b><span>${esc(it.authors || '저자 정보 없음')}${it.translators ? ' · 옮긴이 '+esc(it.translators) : ''}</span><span>${esc([it.publisher, it.year].filter(Boolean).join(' · '))}</span></div>
           </button>`).join('');
-        box.querySelectorAll('.cand').forEach(el => el.onclick = () => {
-          const it = r.items[+el.dataset.i];
-          $('#book').value = it.title;
-          $('#author').value = it.authors;
-          lastQuery = it.title;
-          hideLookup(); updateTitleHint(); renderChips();
-        });
+        box.querySelectorAll('.cand').forEach(el => el.onclick = () => { onPick(r.items[+el.dataset.i]); close(); });
       }
-      const x = box.querySelector('[data-x]'); if(x) x.onclick = hideLookup;
-    }catch(e){ if(seq === lookupSeq) hideLookup(); }
+    }catch(e){
+      if(seq !== lookupSeqs[key]) return;
+      box.innerHTML = `<div class="lh"><span>${esc('검색하지 못했습니다: ' + e.message)}</span><button type="button" data-x>닫기</button></div>`;
+    }
+    const x = box.querySelector('[data-x]'); if(x) x.onclick = close;
   }
+
+  function runLookup(t){
+    lastQuery = t;
+    return bookSearch($('#lookup'), t, it => {
+      $('#book').value = it.title; $('#author').value = it.authors; lastQuery = it.title;
+      updateTitleHint(); renderChips();
+    });
+  }
+  // 🔍 버튼 또는 키보드 '완료/엔터': 저자칸이 차 있어도 바로 검색
+  function manualLookup(){
+    const t = cleanTitle($('#book').value);
+    if(t.length < 2){ setStatus('책 제목을 2글자 이상 적어 주세요.', true); return; }
+    if(!loggedIn()){ openSettings(); return; }
+    clearTimeout(lookupTimer); runLookup(t);
+  }
+  $('#btnFind').innerHTML = SEARCH_ICON;
+  $('#btnFind').onclick = manualLookup;
+  $('#book').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); manualLookup(); } });
 
   function pickBook(b){
     $('#book').value = b.title;
@@ -499,7 +517,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       const images = [];
       for(const p of state.photos){
         const out = await renderOut(p);
-        images.push({ data: out.split(',')[1], mimeType:'image/jpeg', cropped: !!p.crop });
+        images.push({ data: out.split(',')[1], mimeType:'image/jpeg', cropped: !!p.crop, dhash: await dHash(out) });
       }
       // 먼저 휴대폰 안 대기열에 넣고 → 화면은 바로 비움 → 보내기는 뒤에서 진행
       await RN.enqueue({ book, author:$('#author').value.trim(), page:$('#page').value.trim(), memo, mode: state.mode, images });
@@ -533,7 +551,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       <div class="q-row q-${esc(it.status)}" data-cid="${esc(it.cid)}">
         <div class="q-main"><b>${esc(it.label.book || '제목 없음')}</b><span>${it.label.page ? 'p.'+esc(it.label.page)+' · ' : ''}사진 ${esc(it.label.photos)}장 · ${esc(new Date(it.created).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}))}</span>
           ${it.error && it.status !== 'done' ? `<span class="q-err">${esc(it.error)}</span>` : ''}</div>
-        <div class="q-side"><em>${esc(it.status === 'done' && it.result ? 'No.'+it.result.no+' 저장' : STATUS_LABEL[it.status] || it.status)}</em>
+        <div class="q-side"><em>${esc(it.status === 'done' && it.result ? (it.result.skipped ? '중복이라 건너뜀' : 'No.'+it.result.no+' 저장') : STATUS_LABEL[it.status] || it.status)}</em>
           ${it.status === 'failed' || it.status === 'pending' ? `<button type="button" class="linkbtn q-retry">다시 보내기</button>` : ''}
           ${it.status === 'failed' ? `<button type="button" class="linkbtn q-del">삭제</button>` : ''}
           ${it.status === 'done' ? `<button type="button" class="linkbtn q-ok">확인</button>` : ''}</div>
@@ -559,13 +577,61 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
         shownDone.add(it.cid);
         it.seen = true; await RN.putItem(it); changed = true;
         const r = it.result;
-        const saved = Object.assign({ memo: r.memo }, r);
-        if(r.id) state.notes[r.id] = saved;
-        $('#result').innerHTML = `<div class="done"><div class="head">No.${esc(r.no)} 저장했습니다</div>${noteHtml(saved)}</div>`;
+        if(r.skipped){
+          $('#result').innerHTML = skippedHtml(r, it.cid);
+        }else{
+          const saved = Object.assign({ memo: r.memo }, r);
+          if(r.id) state.notes[r.id] = saved;
+          $('#result').innerHTML = `<div class="done"><div class="head">No.${esc(r.no)} 저장했습니다</div>${noteHtml(saved)}</div>`;
+        }
         refreshBooks();
       }
     }
     if(changed) setTimeout(renderQueue, 1500);
+  }
+
+  /* ── 중복으로 건너뛴 기록 ── */
+  function skippedHtml(r, cid){
+    return `<div class="done skip"><div class="head">중복이라 새로 저장하지 않았습니다</div>
+      <article class="note">
+        <p class="summary">${esc(r.notice)}</p>
+        ${r.text ? `<div class="sec">이번에 읽은 내용</div><div class="capture">${esc(r.text)}</div>` : ''}
+        <div class="links">
+          ${r.dupNo ? `<button type="button" class="linkbtn show-dup" data-book="${esc(r.book || '')}">No.${esc(r.dupNo)} 보러 가기</button>` : ''}
+          <button type="button" class="linkbtn force-save" data-cid="${esc(cid)}">그래도 따로 저장</button>
+        </div>
+      </article></div>`;
+  }
+  document.addEventListener('click', async e => {
+    const f = e.target.closest && e.target.closest('.force-save');
+    if(f){
+      const it = await RN.getItem(f.dataset.cid);
+      if(!it || !it.params){ alert('원래 사진이 남아 있지 않습니다. 다시 찍어 저장해 주세요.'); return; }
+      const p = Object.assign({}, it.params, { force: true }); delete p.cid;
+      await RN.enqueue(p); await RN.removeItem(it.cid);
+      $('#result').innerHTML = ''; setStatus('중복 확인 없이 따로 저장합니다.');
+      await renderQueue(); requestBgSync(); flushQueue();
+      return;
+    }
+    const d = e.target.closest && e.target.closest('.show-dup');
+    if(d){ state.filter = d.dataset.book || ''; switchTab('list'); }
+  });
+
+  // 사진 지각 해시(16×16 밝기 차이, 256비트): 같은 사진을 다시 저장·압축한 경우를 알아봄
+  async function dHash(dataUrl){
+    try{
+      const img = await loadImage(dataUrl);
+      const W = 17, H = 16, c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, W, H);
+      const d = ctx.getImageData(0, 0, W, H).data, g = [];
+      for(let i = 0; i < W * H; i++) g.push(d[i*4] * 0.299 + d[i*4+1] * 0.587 + d[i*4+2] * 0.114);
+      let bits = '', hexs = '';
+      for(let y = 0; y < H; y++) for(let x = 0; x < 16; x++) bits += g[y*W + x] > g[y*W + x + 1] ? '1' : '0';
+      for(let i = 0; i < 256; i += 4) hexs += parseInt(bits.slice(i, i + 4), 2).toString(16);
+      return hexs;
+    }catch(e){ return ''; }
   }
 
   async function flushQueue(){
@@ -582,7 +648,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   }
 
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js?v=8').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=14').catch(() => {});
     navigator.serviceWorker.addEventListener('message', e => { if(e.data && e.data.type === 'outbox-updated') renderQueue(); });
   }
   window.addEventListener('online', flushQueue);
@@ -645,6 +711,8 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       <label class="chk"><input type="checkbox" class="e-regen"> 고친 내용으로 요약·주요 단어 다시 만들기</label>
       <div class="status e-status"></div>
       <div class="edit-actions">
+        <button type="button" class="btn danger e-del">삭제</button>
+        <span class="grow"></span>
         <button type="button" class="btn e-cancel">취소</button>
         <button type="button" class="btn primary e-save">수정 저장</button>
       </div>`;
@@ -662,6 +730,26 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       art.replaceWith(wrap.firstElementChild);
     };
     art.querySelector('.e-cancel').onclick = () => restore(n);
+    art.querySelector('.e-del').onclick = async () => {
+      const label = n.no ? 'No.' + n.no : '이 기록';
+      if(!confirm(`${label}을(를) 삭제할까요?\n\n시트·전체 기록 문서·책별 문서에서 함께 지워지고, 사진은 드라이브 휴지통으로 갑니다(30일 안에 복구 가능). 지운 내용은 시트의 '삭제된 기록'에 보관됩니다.`)) return;
+      const st = art.querySelector('.e-status');
+      art.querySelectorAll('button').forEach(b => b.disabled = true);
+      st.className = 'status e-status'; st.textContent = '삭제 중…';
+      try{
+        const r = await call('delete', { id });
+        delete state.notes[id];
+        const msg = document.createElement('div');
+        msg.className = 'notice deleted-msg';
+        msg.textContent = `${label} 기록을 삭제했습니다.` + (r.trashedPhotos ? ` 사진 ${r.trashedPhotos}장은 휴지통으로 옮겼습니다.` : '') + (r.warning ? ` (${r.warning})` : '');
+        art.replaceWith(msg);
+        setTimeout(() => msg.remove(), 6000);
+        refreshBooks();
+      }catch(e){
+        st.className = 'status e-status err'; st.textContent = e.message;
+        art.querySelectorAll('button').forEach(b => b.disabled = false);
+      }
+    };
     art.querySelector('.e-save').onclick = async () => {
       const btn = art.querySelector('.e-save'), st = art.querySelector('.e-status');
       const regen = art.querySelector('.e-regen').checked;
@@ -770,36 +858,23 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
   };
 
   // 제목을 쓰면 저자 후보 찾기 (기록하기 화면과 같은 검색 사용)
-  let wTimer = null, wLast = '', wSeq = 0;
+  let wTimer = null, wLast = '';
   const wHideLookup = () => { $('#wLookup').classList.add('hidden'); $('#wLookup').innerHTML = ''; };
-  $('#wAuthor').addEventListener('input', () => { if($('#wAuthor').value.trim()) wHideLookup(); });
-  $('#wTitle').addEventListener('input', () => {
+  const wPick = it => { $('#wTitle').value = it.title; $('#wAuthor').value = it.authors; wLast = it.title; };
+  function wSearch(manual){
     clearTimeout(wTimer);
     const t = cleanTitle($('#wTitle').value);
-    if(t.length < 2 || $('#wAuthor').value.trim() || !loggedIn()){ wHideLookup(); return; }
-    if(t === wLast) return;
-    wTimer = setTimeout(async () => {
-      wLast = t; const seq = ++wSeq, box = $('#wLookup');
-      box.innerHTML = '<div class="lh"><span>저자 찾는 중…</span></div>'; box.classList.remove('hidden');
-      try{
-        const r = await call('lookup', { q: t });
-        if(seq !== wSeq) return;
-        if(!r.items.length){ box.innerHTML = '<div class="lh"><span>검색 결과가 없습니다. 저자를 직접 적어 주세요.</span><button type="button" data-x>닫기</button></div>'; }
-        else{
-          box.innerHTML = '<div class="lh"><span>이 책인가요?</span><button type="button" data-x>닫기</button></div>' + r.items.map((it, i) => `
-            <button type="button" class="cand" data-i="${i}">
-              ${safeImg(it.thumbnail) ? `<img src="${esc(safeImg(it.thumbnail))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
-              <div><b>${esc(it.fullTitle || it.title)}</b><span>${esc(it.authors || '저자 정보 없음')}</span><span>${esc([it.publisher, it.year].filter(Boolean).join(' · '))}</span></div>
-            </button>`).join('');
-          box.querySelectorAll('.cand').forEach(el => el.onclick = () => {
-            const it = r.items[+el.dataset.i];
-            $('#wTitle').value = it.title; $('#wAuthor').value = it.authors; wLast = it.title; wHideLookup();
-          });
-        }
-        const x = box.querySelector('[data-x]'); if(x) x.onclick = wHideLookup;
-      }catch(e){ if(seq === wSeq) wHideLookup(); }
-    }, 700);
-  });
+    if(t.length < 2){ if(manual) wSet('책 제목을 2글자 이상 적어 주세요.', true); else wHideLookup(); return; }
+    if(!loggedIn()){ if(manual) openSettings(); return; }
+    if(!manual && ($('#wAuthor').value.trim() || t === wLast)) return;
+    wLast = t; wSet('');
+    bookSearch($('#wLookup'), t, wPick);
+  }
+  $('#wFind').innerHTML = SEARCH_ICON;
+  $('#wFind').onclick = () => wSearch(true);
+  $('#wTitle').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); wSearch(true); } });
+  $('#wTitle').addEventListener('input', () => { clearTimeout(wTimer); wTimer = setTimeout(() => wSearch(false), 700); });
+  $('#wAuthor').addEventListener('input', () => { if($('#wAuthor').value.trim()) wHideLookup(); });
 
   /* ── 모아보기 ── */
   async function loadList(){
