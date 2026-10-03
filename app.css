@@ -214,3 +214,6 @@ textarea.short{min-height:70px}
 .edit-actions .grow{flex:1}
 .btn.danger{color:var(--danger);border-color:var(--danger);background:transparent}
 .deleted-msg{padding:14px 0;border-bottom:1px solid var(--rule)}
+
+.bookbar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0 10px;border-bottom:1px solid var(--rule);font-size:14px;color:var(--pencil)}
+.note.editing input.e-book{font-size:17px}

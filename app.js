@@ -43,7 +43,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     await RN.clearAuth();
     try{ renderLoginBanner(); }catch(e){}
   }
-  const SERVER_VERSION = '2026-10-03';   // 이 앱이 기대하는 서버(Code.gs) 버전
+  const SERVER_VERSION = '2026-10-03c';   // 이 앱이 기대하는 서버(Code.gs) 버전
   async function call(action, params){
     try{ return await RN.call(action, params); }
     catch(e){
@@ -661,7 +661,12 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     navigator.serviceWorker.addEventListener('message', e => { if(e.data && e.data.type === 'outbox-updated') renderQueue(); });
   }
   window.addEventListener('online', flushQueue);
-  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible'){ renderQueue(); flushQueue(); } });
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    renderQueue(); flushQueue();
+    // 드라이브 앱에서 고치고 돌아온 경우: 보고 있던 모아보기를 새로 불러와 반영
+    if(!$('#tab-list').classList.contains('hidden') && !document.querySelector('#notes .editing')) loadList();
+  });
   setInterval(async () => { if(document.visibilityState === 'visible' && await RN.hasUnsent()) flushQueue(); }, 30000);
   // 백그라운드 전송이 안 되는 브라우저에서 아직 보낼 게 남았으면 닫기 전에 한 번 묻기
   window.addEventListener('beforeunload', e => {
@@ -713,7 +718,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
     art.classList.add('editing');
     art.innerHTML = `
       <div class="meta"><span>${n.no?`<span class="no">No.${esc(n.no)}</span>&nbsp; `:''}${esc(n.date)}</span><span>편집 중</span></div>
-      <h3>${esc(n.book)}</h3>
+      <div class="field"><label class="f">책 제목 <small>바꾸면 그 책으로 옮겨집니다</small></label><input type="text" class="e-book book" list="bookList" maxlength="100" autocomplete="off"></div>
       <div class="field"><label class="f">페이지</label><input type="text" class="e-page" inputmode="numeric" maxlength="20"></div>
       <div class="field"><label class="f">캡처 내용 <small>잘못 읽힌 글자를 고치거나 필요 없는 부분을 지우세요</small></label><textarea class="e-text"></textarea></div>
       <div class="field"><label class="f">내 생각</label><textarea class="e-memo" maxlength="5000"></textarea></div>
@@ -727,6 +732,7 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       </div>`;
     // 값은 innerHTML이 아니라 value로 넣어 특수문자·줄바꿈을 그대로 유지
     art.querySelector('.e-page').value = n.page || '';
+    art.querySelector('.e-book').value = n.book || '';
     art.querySelector('.e-text').value = n.text || '';
     art.querySelector('.e-memo').value = n.memo || '';
     const ta = art.querySelector('.e-text');
@@ -768,11 +774,15 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       const slow = setTimeout(() => { st.textContent = '시트와 문서 두 곳을 고치는 중… 조금만 기다려 주세요.'; }, 6000);
       const slower = setTimeout(() => { st.textContent = '다른 저장이 끝나길 기다리는 중일 수 있습니다. 창을 닫지 말고 기다려 주세요.'; }, 20000);
       try{
+        const title = cleanTitle(art.querySelector('.e-book').value);
+        if(!title){ throw new Error('책 제목은 비워 둘 수 없습니다.'); }
         const r = await call('update', {
-          id, page: art.querySelector('.e-page').value.trim(),
+          id, title, page: art.querySelector('.e-page').value.trim(),
           text: art.querySelector('.e-text').value, memo: art.querySelector('.e-memo').value.trim(), regen
         });
-        const updated = Object.assign({}, n, r.note, { warning: r.warning || '', notice: '수정 내용을 시트와 문서에 반영했습니다.' });
+        const updated = Object.assign({}, n, r.note, { warning: r.warning || '',
+          notice: r.movedTo ? `「${r.movedTo}」(으)로 옮겼습니다. 시트와 문서에도 반영했습니다.` : '수정 내용을 시트와 문서에 반영했습니다.' });
+        if(r.movedTo) refreshBooks().then(() => { if(!$('#tab-list').classList.contains('hidden')) renderShelf(); });
         state.notes[id] = Object.assign({}, updated, { warning:'', notice:'' });
         restore(updated);
       }catch(e){
@@ -903,9 +913,29 @@ if (!window.crypto || !window.crypto.subtle || !window.fetch || !window.Promise)
       const ml = $('#masterLink');
       if(safeLink(r.masterUrl)){ ml.href = safeLink(r.masterUrl); ml.classList.remove('hidden'); }
       r.notes.forEach(n => { if(n.id) state.notes[n.id] = Object.assign({ masterUrl: r.masterUrl }, n); });
-      box.innerHTML = r.notes.length ? r.notes.map(n => noteHtml(state.notes[n.id] || n)).join('')
-        : '<div class="empty">아직 기록이 없습니다. 읽던 페이지를 찍어 첫 노트를 남겨 보세요.</div>';
+      const bookBar = state.filter ? `<div class="bookbar"><span>「${esc(state.filter)}」 ${esc(r.notes.length)}개 기록</span><button type="button" class="linkbtn" id="btnRenameBook">✎ 책 이름 바꾸기</button></div>` : '';
+      box.innerHTML = bookBar + (r.synced ? `<div class="notice synced-msg">드라이브에서 고친 기록 ${esc(r.synced)}건을 반영했습니다.</div>` : '') +
+        (r.notes.length ? r.notes.map(n => noteHtml(state.notes[n.id] || n)).join('')
+        : '<div class="empty">아직 기록이 없습니다. 읽던 페이지를 찍어 첫 노트를 남겨 보세요.</div>');
+      const rb = $('#btnRenameBook');
+      if(rb) rb.onclick = renameBookFlow;
     }catch(e){ box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+  async function renameBookFlow(){
+    const from = state.filter;
+    const to = cleanTitle(prompt(`「${from}」의 새 책 제목을 입력하세요.\n이미 있는 다른 책 제목을 넣으면 그 책으로 합쳐집니다.`, from) || '');
+    if(!to || to === from) return;
+    const rb = $('#btnRenameBook'); if(rb){ rb.disabled = true; rb.textContent = '바꾸는 중…'; }
+    try{
+      const r = await call('renamebook', { from, to });
+      state.filter = r.book;
+      if(cleanTitle($('#book').value) === from) $('#book').value = r.book;
+      if(store.get('lastBook','') === from) store.set('lastBook', r.book);
+      await loadList(); refreshBooks();
+      const msg = document.createElement('div'); msg.className = 'notice synced-msg';
+      msg.textContent = r.merged ? `「${from}」 기록 ${r.moved}개를 「${r.book}」(으)로 합쳤습니다.` : `책 이름을 「${r.book}」(으)로 바꿨습니다. 시트·문서에도 반영했습니다.`;
+      $('#notes').prepend(msg);
+    }catch(e){ alert(e.message); if(rb){ rb.disabled = false; rb.textContent = '✎ 책 이름 바꾸기'; } }
   }
   function setBooks(books){
     state.books = books || [];
